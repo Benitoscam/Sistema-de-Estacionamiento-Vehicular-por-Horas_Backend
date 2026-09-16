@@ -19,9 +19,12 @@ def create_app(config_name="default"):
     # Registrar blueprints (rutas HTTP)
     from app.adapters.http import (
         auth_bp,
+        comprobantes_bp,
+        dashboard_bp,
         espacios_bp,
         ocupacion_bp,
         pagos_bp,
+        reportes_bp,
         reservas_bp,
         sesiones_bp,
         webhooks_bp,
@@ -37,6 +40,9 @@ def create_app(config_name="default"):
     app.register_blueprint(sesiones_bp.bp, url_prefix="/api")
     app.register_blueprint(pagos_bp.bp, url_prefix="/api")
     app.register_blueprint(webhooks_bp.bp, url_prefix="/api")
+    app.register_blueprint(dashboard_bp.bp, url_prefix="/api")
+    app.register_blueprint(reportes_bp.bp, url_prefix="/api")
+    app.register_blueprint(comprobantes_bp.bp, url_prefix="/api")
     register_error_handlers(app, jwt)
 
     # Health check
