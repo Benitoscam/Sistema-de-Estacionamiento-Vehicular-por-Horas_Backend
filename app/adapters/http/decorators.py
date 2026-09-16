@@ -16,7 +16,7 @@ def roles_required(*allowed_roles):
                 return (
                     jsonify(
                         {
-                            "error": "forbidden",
+                            "error": "prohibido",
                             "detail": "rol sin permiso para esta acción",
                         }
                     ),

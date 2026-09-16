@@ -33,6 +33,13 @@ espacio_estado = db.Enum(
     native_enum=True,
 )
 
+reserva_estado = db.Enum(
+    "confirmada", "cancelada", "completada",
+    name="reserva_estado",
+    create_constraint=True,
+    native_enum=True,
+)
+
 
 # ──────────────────────────────────────────────
 # Modelo: Usuario
@@ -153,3 +160,45 @@ class BloqueoMantenimiento(db.Model):
 
     def __repr__(self):
         return f"<Bloqueo {self.espacio_id} {self.fecha_inicio}–{self.fecha_fin}>"
+
+
+# ──────────────────────────────────────────────
+# Modelo: Reserva (Fase 2A, RF-02)
+# ──────────────────────────────────────────────
+
+class Reserva(db.Model):
+    __tablename__ = "reservas"
+
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    espacio_id = db.Column(
+        db.Uuid,
+        db.ForeignKey("espacios.id"),
+        nullable=False,
+    )
+    usuario_id = db.Column(
+        db.Uuid,
+        db.ForeignKey("usuarios.id"),
+        nullable=False,
+    )
+    fecha = db.Column(db.Date, nullable=False)
+    hora_inicio_planeada = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+    )
+    hora_fin_planeada = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+    )
+    monto_pagado = db.Column(db.Numeric(10, 2), nullable=True)
+    estado = db.Column(
+        reserva_estado,
+        nullable=False,
+        server_default="confirmada",
+    )
+
+    # Relationships
+    espacio = db.relationship("Espacio")
+    cliente = db.relationship("Usuario", foreign_keys=[usuario_id])
+
+    def __repr__(self):
+        return f"<Reserva {self.espacio_id} [{self.estado}]>"
