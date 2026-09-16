@@ -1,9 +1,12 @@
-"""Ingresos walk-in y salidas del operador (RF-03) — Fase 2B. Sin pago (Fase 3)."""
+"""Ingresos walk-in y salidas del operador (RF-03) — Fase 4.
+
+Salida con pago en efectivo (opcional, default sin pago como en Fase 2B).
+"""
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
 
-from app.adapters.db.models import RegistroIngresoSalida
+from app.adapters.db.models import Pago, RegistroIngresoSalida
 from app.adapters.http import schemas
 from app.adapters.http.decorators import roles_required
 from app.adapters.http.errors import error
@@ -101,10 +104,29 @@ def liquidar_salida(registro_id):
     rid = schemas.parse_uuid(registro_id)
     if rid is None:
         return error("registro_id inválido", 400)
+    datos = schemas.json_body(request)
+    metodo = (datos.get("metodo_pago") or "").strip().lower() or None
+    if metodo and metodo != "efectivo":
+        return error("metodo_pago inválido (solo efectivo o vacío)", 400)
     try:
         registro, monto = registrar_salida.ejecutar(rid)
     except ErrorDominio as exc:
         return _dominio_a_respuesta(exc)
+    pago = None
+    if metodo == "efectivo":
+        from flask_jwt_extended import get_jwt_identity
+        from app.adapters.db.models import Usuario
+
+        operador = db.session.get(Usuario, schemas.parse_uuid(get_jwt_identity()))
+        pago = Pago(
+            registro_ingreso_id=registro.id,
+            referencia_transaccion=f"efectivo-{registro.id}",
+            monto=monto,
+            metodo="efectivo",
+            estado="confirmado",
+        )
+        db.session.add(pago)
+        db.session.commit()
     tarifa = registro.espacio.zona.tarifa_por_hora if registro.espacio else None
     desglose = {
         "hora_entrada": registro.hora_entrada.isoformat(),

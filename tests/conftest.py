@@ -30,3 +30,9 @@ def db(app):
     with app.app_context():
         yield _db
         _db.session.remove()
+
+
+@pytest.fixture(scope="function")
+def runner(app):
+    """Runner CLI para tests de comandos Flask."""
+    return app.test_cli_runner()

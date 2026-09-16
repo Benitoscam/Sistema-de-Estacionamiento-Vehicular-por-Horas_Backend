@@ -1,4 +1,4 @@
-"""Consultas agregadas: dashboard y reportes — Fase 3B.
+"""Consultas agregadas: dashboard, reportes y analítica — Fase 4.
 
 Regla de fechas: como pagos no tiene fecha propia, los ingresos se agrupan
 por fecha de servicio (reservas: hora_inicio_planeada; walk-in: hora_salida).
@@ -9,7 +9,13 @@ from decimal import Decimal
 
 from sqlalchemy import func
 
-from app.adapters.db.models import Espacio, Pago, RegistroIngresoSalida, Reserva, Zona
+from app.adapters.db.models import (
+    Espacio,
+    Pago,
+    RegistroIngresoSalida,
+    Reserva,
+    Zona,
+)
 from app.extensions import db
 
 
@@ -144,3 +150,97 @@ def ingresos_por_zona(desde=None, hasta=None, zona_id=None):
         ),
     }
     return filas, totales
+
+
+def analitica_demanda(desde=None, hasta=None, zona_id=None):
+    """RF-10: horas pico entrada/salida, permanencia promedio, rotación por espacio."""
+    inicio, fin = _rango_fechas(desde, hasta)
+
+    # Entradas por hora del día (0–23) — walk-in
+    consulta_entradas = db.session.query(
+        func.extract("hour", RegistroIngresoSalida.hora_entrada).label("hora"),
+        func.count(RegistroIngresoSalida.id),
+    )
+    if inicio:
+        consulta_entradas = consulta_entradas.filter(
+            RegistroIngresoSalida.hora_entrada >= inicio
+        )
+    if fin:
+        consulta_entradas = consulta_entradas.filter(
+            RegistroIngresoSalida.hora_entrada <= fin
+        )
+    entradas_rows = consulta_entradas.group_by("hora").all()
+
+    # Salidas por hora del día — walk-in
+    consulta_salidas = db.session.query(
+        func.extract("hour", RegistroIngresoSalida.hora_salida).label("hora"),
+        func.count(RegistroIngresoSalida.id),
+    ).filter(RegistroIngresoSalida.hora_salida.is_not(None))
+    if inicio:
+        consulta_salidas = consulta_salidas.filter(
+            RegistroIngresoSalida.hora_salida >= inicio
+        )
+    if fin:
+        consulta_salidas = consulta_salidas.filter(
+            RegistroIngresoSalida.hora_salida <= fin
+        )
+    salidas_rows = consulta_salidas.group_by("hora").all()
+
+    entradas = {int(h): c for h, c in entradas_rows}
+    salidas = {int(h): c for h, c in salidas_rows}
+    horas_entrada = [{"hora": h, "cantidad": entradas.get(h, 0)} for h in range(24)]
+    horas_salida = [{"hora": h, "cantidad": salidas.get(h, 0)} for h in range(24)]
+    hora_pico_entrada = max(horas_entrada, key=lambda x: x["cantidad"])
+    hora_pico_salida = max(horas_salida, key=lambda x: x["cantidad"])
+
+    # Permanencia promedio (walk-in liquidadas)
+    consulta_permanencia = db.session.query(
+        func.avg(
+            func.extract("epoch", RegistroIngresoSalida.hora_salida)
+            - func.extract("epoch", RegistroIngresoSalida.hora_entrada)
+        )
+    ).filter(RegistroIngresoSalida.hora_salida.is_not(None))
+    if inicio:
+        consulta_permanencia = consulta_permanencia.filter(
+            RegistroIngresoSalida.hora_salida >= inicio
+        )
+    if fin:
+        consulta_permanencia = consulta_permanencia.filter(
+            RegistroIngresoSalida.hora_salida <= fin
+        )
+    promedio_seg = consulta_permanencia.scalar()
+    permanencia_promedio_min = round(promedio_seg / 60, 1) if promedio_seg else 0
+
+    # Rotación por espacio (walk-in liquidadas / espacios)
+    consulta_rotacion = db.session.query(
+        Espacio.codigo,
+        func.count(RegistroIngresoSalida.id),
+    ).join(
+        RegistroIngresoSalida, Espacio.id == RegistroIngresoSalida.espacio_id
+    ).filter(
+        RegistroIngresoSalida.hora_salida.is_not(None)
+    )
+    if inicio:
+        consulta_rotacion = consulta_rotacion.filter(
+            RegistroIngresoSalida.hora_salida >= inicio
+        )
+    if fin:
+        consulta_rotacion = consulta_rotacion.filter(
+            RegistroIngresoSalida.hora_salida <= fin
+        )
+    if zona_id:
+        consulta_rotacion = consulta_rotacion.filter(Espacio.zona_id == zona_id)
+    rotacion_rows = consulta_rotacion.group_by(Espacio.codigo).all()
+    rotacion = [
+        {"espacio": codigo, "usos": usos}
+        for codigo, usos in sorted(rotacion_rows, key=lambda x: -x[1])
+    ]
+
+    return {
+        "horas_entrada": horas_entrada,
+        "horas_salida": horas_salida,
+        "hora_pico_entrada": hora_pico_entrada,
+        "hora_pico_salida": hora_pico_salida,
+        "permanencia_promedio_min": permanencia_promedio_min,
+        "rotacion_por_espacio": rotacion,
+    }
