@@ -202,3 +202,41 @@ class Reserva(db.Model):
 
     def __repr__(self):
         return f"<Reserva {self.espacio_id} [{self.estado}]>"
+
+
+# ──────────────────────────────────────────────
+# Modelo: RegistroIngresoSalida (Fase 2B, RF-03)
+# ──────────────────────────────────────────────
+
+class RegistroIngresoSalida(db.Model):
+    __tablename__ = "registros_ingreso_salida"
+
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    espacio_id = db.Column(
+        db.Uuid,
+        db.ForeignKey("espacios.id"),
+        nullable=False,
+    )
+    placa = db.Column(db.String(15), nullable=False)
+    operador_id = db.Column(
+        db.Uuid,
+        db.ForeignKey("usuarios.id"),
+        nullable=True,
+    )
+    hora_entrada = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        server_default=db.func.now(),
+    )
+    hora_salida = db.Column(
+        db.DateTime(timezone=True),
+        nullable=True,
+    )
+    monto_cobrado = db.Column(db.Numeric(10, 2), nullable=True)
+
+    # Relationships
+    espacio = db.relationship("Espacio")
+    operador = db.relationship("Usuario", foreign_keys=[operador_id])
+
+    def __repr__(self):
+        return f"<Ingreso {self.placa} {self.hora_entrada}>"
