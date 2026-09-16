@@ -21,6 +21,10 @@ class ReservaNoCancelabe(ErrorDominio):
     estado_http = 409
 
 
+class PagoDuplicado(ErrorDominio):
+    estado_http = 409
+
+
 class PermisoDenegado(ErrorDominio):
     estado_http = 403
 

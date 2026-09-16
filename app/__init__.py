@@ -21,8 +21,10 @@ def create_app(config_name="default"):
         auth_bp,
         espacios_bp,
         ocupacion_bp,
+        pagos_bp,
         reservas_bp,
         sesiones_bp,
+        webhooks_bp,
         zonas_bp,
     )
     from app.adapters.http.errors import register_error_handlers
@@ -33,6 +35,8 @@ def create_app(config_name="default"):
     app.register_blueprint(ocupacion_bp.bp, url_prefix="/api")
     app.register_blueprint(reservas_bp.bp, url_prefix="/api")
     app.register_blueprint(sesiones_bp.bp, url_prefix="/api")
+    app.register_blueprint(pagos_bp.bp, url_prefix="/api")
+    app.register_blueprint(webhooks_bp.bp, url_prefix="/api")
     register_error_handlers(app, jwt)
 
     # Health check

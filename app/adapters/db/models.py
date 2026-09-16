@@ -240,3 +240,55 @@ class RegistroIngresoSalida(db.Model):
 
     def __repr__(self):
         return f"<Ingreso {self.placa} {self.hora_entrada}>"
+
+
+metodo_pago = db.Enum(
+    "tarjeta", "efectivo",
+    name="metodo_pago",
+    create_constraint=True,
+    native_enum=True,
+)
+
+pago_estado = db.Enum(
+    "pendiente", "confirmado", "reembolsado",
+    name="pago_estado",
+    create_constraint=True,
+    native_enum=True,
+)
+
+
+# ──────────────────────────────────────────────
+# Modelo: Pago (Fase 3A)
+# ──────────────────────────────────────────────
+
+class Pago(db.Model):
+    __tablename__ = "pagos"
+
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    reserva_id = db.Column(
+        db.Uuid,
+        db.ForeignKey("reservas.id"),
+        nullable=True,
+        unique=True,
+    )
+    registro_ingreso_id = db.Column(
+        db.Uuid,
+        db.ForeignKey("registros_ingreso_salida.id"),
+        nullable=True,
+        unique=True,
+    )
+    referencia_transaccion = db.Column(db.String(255), unique=True, nullable=False)
+    monto = db.Column(db.Numeric(10, 2), nullable=False)
+    metodo = db.Column(metodo_pago, nullable=False)
+    estado = db.Column(
+        pago_estado,
+        nullable=False,
+        server_default="pendiente",
+    )
+
+    # Relationships
+    reserva = db.relationship("Reserva", foreign_keys=[reserva_id])
+    registro = db.relationship("RegistroIngresoSalida", foreign_keys=[registro_ingreso_id])
+
+    def __repr__(self):
+        return f"<Pago {self.referencia_transaccion} [{self.estado}]>"
