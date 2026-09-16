@@ -13,9 +13,25 @@ def create_app(config_name="default"):
     cors.init_app(app, resources={r"/api/*": {"origins": app.config["FRONTEND_URL"]}})
     migrate.init_app(app, db)
 
+    # Importar modelos para que Flask-Migrate los detecte
+    from app.adapters.db import models # noqa: F401
+
     # Registrar blueprints (rutas HTTP)
-    from app.adapters.http import reservation_routes
+    from app.adapters.http import (
+        auth_bp,
+        espacios_bp,
+        ocupacion_bp,
+        reservation_routes,
+        zonas_bp,
+    )
+    from app.adapters.http.errors import register_error_handlers
+
+    app.register_blueprint(auth_bp.bp, url_prefix="/api")
+    app.register_blueprint(zonas_bp.bp, url_prefix="/api")
+    app.register_blueprint(espacios_bp.bp, url_prefix="/api")
+    app.register_blueprint(ocupacion_bp.bp, url_prefix="/api")
     app.register_blueprint(reservation_routes.bp, url_prefix="/api")
+    register_error_handlers(app, jwt)
 
     # Health check
     @app.route("/api/health")
