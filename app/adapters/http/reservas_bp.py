@@ -67,6 +67,7 @@ def reserva_a_dict(reserva, monto_estimado=None):
         "espacio_id": str(reserva.espacio_id),
         "espacio_codigo": reserva.espacio.codigo if reserva.espacio else None,
         "usuario_id": str(reserva.usuario_id),
+        "placa": getattr(reserva, "placa", None),
         "fecha": reserva.fecha.isoformat() if reserva.fecha else None,
         "hora_inicio_planeada": reserva.hora_inicio_planeada.isoformat()
         if reserva.hora_inicio_planeada
@@ -89,7 +90,7 @@ def crear_reserva():
         return err
     datos = schemas.json_body(request)
     faltantes = schemas.missing_fields(
-        datos, ("espacio_id", "hora_inicio_planeada", "hora_fin_planeada")
+        datos, ("espacio_id", "hora_inicio_planeada", "hora_fin_planeada", "placa")
     )
     if faltantes:
         return error(f"campos requeridos: {', '.join(faltantes)}", 400)
@@ -100,8 +101,13 @@ def crear_reserva():
     fin = _parse_fecha(datos.get("hora_fin_planeada"))
     if inicio is None or fin is None:
         return error("fechas inválidas (usar ISO 8601)", 400)
+    placa = (datos.get("placa") or "").strip()
+    if not placa:
+        return error("placa requerida", 400)
     try:
-        reserva, monto = reservar_espacio.ejecutar(usuario.id, espacio_id, inicio, fin)
+        reserva, monto = reservar_espacio.ejecutar(
+            usuario.id, espacio_id, inicio, fin, placa
+        )
     except ErrorDominio as exc:
         return _dominio_a_respuesta(exc)
     return jsonify({"data": reserva_a_dict(reserva, monto)}), 201
@@ -114,11 +120,11 @@ def mis_reservas():
     usuario, err = _actor()
     if err:
         return err
-    reservas = (
-        Reserva.query.filter_by(usuario_id=usuario.id)
-        .order_by(Reserva.hora_inicio_planeada)
-        .all()
-    )
+    consulta = Reserva.query.filter_by(usuario_id=usuario.id)
+    placa = (request.args.get("placa") or "").strip().upper()
+    if placa:
+        consulta = consulta.filter(Reserva.placa == placa)
+    reservas = consulta.order_by(Reserva.hora_inicio_planeada).all()
     return jsonify({"data": [reserva_a_dict(r) for r in reservas]}), 200
 
 

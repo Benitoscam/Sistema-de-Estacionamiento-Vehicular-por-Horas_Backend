@@ -47,6 +47,7 @@ def test_comprobante_reserva_con_limpieza(client, db):
                 "espacio_id": espacio_id,
                 "hora_inicio_planeada": inicio.isoformat(),
                 "hora_fin_planeada": (inicio + timedelta(hours=2)).isoformat(),
+                "placa": "RPT001",
             },
             headers=headers,
         ).get_json()["data"]

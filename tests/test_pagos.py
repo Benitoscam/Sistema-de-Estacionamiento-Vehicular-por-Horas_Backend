@@ -22,6 +22,7 @@ def _reservar(client, headers, codigo="A-04"):
             "espacio_id": espacio_id,
             "hora_inicio_planeada": inicio.isoformat(),
             "hora_fin_planeada": fin.isoformat(),
+            "placa": "TEST01",
         },
         headers=headers,
     )

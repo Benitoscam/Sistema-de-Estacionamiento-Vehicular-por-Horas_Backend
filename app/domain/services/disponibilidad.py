@@ -6,7 +6,7 @@ from app.domain.value_objects import RangoHorario
 
 def verificar(estado_espacio, reservas_confirmadas, rango):
     """Lanza EspacioNoDisponible si el espacio no puede reservarse en el rango."""
-    if estado_espacio != "disponible":
+    if estado_espacio in ("ocupado", "mantenimiento"):
         raise EspacioNoDisponible(f"espacio en estado '{estado_espacio}', no disponible")
     for reserva in reservas_confirmadas:
         existente = RangoHorario(reserva.hora_inicio_planeada, reserva.hora_fin_planeada)

@@ -2,18 +2,22 @@
 
 Transacción con bloqueo de fila (FOR UPDATE) sobre el espacio:
 valida disponibilidad, crea la reserva confirmada y pasa el espacio
-a 'reservado' en la misma transacción. Sin cobro (Fase 3).
+a 'reservado' SOLO si la ventana está activa ahora. Sin cobro (Fase 3).
+Placa requerida (validada con VO Placa, mayúsculas, 3-15 chars).
 """
+
+from datetime import datetime, timezone
 
 from app.adapters.db.models import Espacio, Reserva, Usuario
 from app.domain.excepciones import RecursoNoEncontrado
 from app.domain.services import disponibilidad, tarifas
-from app.domain.value_objects import RangoHorario
+from app.domain.value_objects import Placa, RangoHorario
 from app.extensions import db
 
 
-def ejecutar(usuario_id, espacio_id, inicio, fin):
+def ejecutar(usuario_id, espacio_id, inicio, fin, placa):
     rango = RangoHorario(inicio, fin)
+    placa_normal = str(Placa(placa))
 
     espacio = (
         db.session.query(Espacio)
@@ -45,10 +49,15 @@ def ejecutar(usuario_id, espacio_id, inicio, fin):
         fecha=rango.inicio.date(),
         hora_inicio_planeada=rango.inicio,
         hora_fin_planeada=rango.fin,
+        placa=placa_normal,
         monto_pagado=None,
         estado="confirmada",
     )
-    espacio.estado = "reservado"
+
+    ahora = datetime.now(timezone.utc)
+    if rango.inicio <= ahora < rango.fin:
+        espacio.estado = "reservado"
+
     db.session.add(reserva)
     db.session.commit()
     return reserva, monto

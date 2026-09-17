@@ -189,6 +189,7 @@ class Reserva(db.Model):
         db.DateTime(timezone=True),
         nullable=False,
     )
+    placa = db.Column(db.String(15), nullable=True)
     monto_pagado = db.Column(db.Numeric(10, 2), nullable=True)
     estado = db.Column(
         reserva_estado,

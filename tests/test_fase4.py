@@ -188,6 +188,7 @@ def test_comando_expirar(client, db, runner):
                 "espacio_id": espacio_id,
                 "hora_inicio_planeada": (ahora - timedelta(hours=3)).isoformat(),
                 "hora_fin_planeada": (ahora - timedelta(hours=1)).isoformat(),
+                "placa": "EXP001",
             },
             headers=headers,
         )

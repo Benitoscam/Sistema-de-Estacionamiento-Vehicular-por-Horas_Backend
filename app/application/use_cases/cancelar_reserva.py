@@ -1,8 +1,13 @@
 """Caso de uso CancelarReserva (RF-02) — Fase 2A.
 
-Solo reservas confirmadas. Solo el dueño o admin. Libera el espacio
-a 'disponible' en la misma transacción (con FOR UPDATE).
+Solo reservas confirmadas. Solo el dueño o admin. Recalcula el
+estado del espacio: libera a 'disponible' solo si no queda otra
+reserva confirmada vigente (fin >= ahora). Con FOR UPDATE.
 """
+
+from datetime import datetime, timezone
+
+from sqlalchemy import and_
 
 from app.adapters.db.models import Espacio, Reserva
 from app.domain.excepciones import (
@@ -29,7 +34,20 @@ def ejecutar(usuario, reserva_id):
         .one_or_none()
     )
     reserva.estado = "cancelada"
-    if espacio is not None:
-        espacio.estado = "disponible"
+
+    ahora = datetime.now(timezone.utc)
+    if espacio is not None and espacio.estado == "reservado":
+        otra_vigente = (
+            Reserva.query.filter(
+                and_(
+                    Reserva.espacio_id == espacio.id,
+                    Reserva.estado == "confirmada",
+                    Reserva.hora_fin_planeada >= ahora,
+                )
+            ).count()
+        )
+        if otra_vigente == 0:
+            espacio.estado = "disponible"
+
     db.session.commit()
     return reserva
