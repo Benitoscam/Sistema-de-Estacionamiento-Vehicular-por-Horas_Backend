@@ -172,33 +172,35 @@ def test_analitica_roles(client):
 
 
 def test_comando_expirar(client, db, runner):
-    from app.adapters.db.models import Espacio, Reserva
-
-    token = _token(client, "cliente@parqueo.test")
-    headers = {"Authorization": f"Bearer {token}"}
-    espacios = client.get("/api/espacios", headers=headers).get_json()["data"]
-    espacio_id = next(e["id"] for e in espacios if e["codigo"] == "M-03")
+    """Crea reserva pasada directo por DB (la API la rechaza), luego expira."""
+    from app.adapters.db.models import Espacio, Reserva, Usuario
 
     ahora = datetime.now(timezone.utc)
+    usuario = Usuario.query.filter_by(correo="cliente@parqueo.test").first()
+    espacio = Espacio.query.filter_by(codigo="M-03").first()
+    assert usuario is not None and espacio is not None
+
+    # Limpiar cualquier residuo previo en M-03
+    Reserva.query.filter_by(espacio_id=espacio.id, estado="confirmada").delete()
+    espacio.estado = "disponible"
+    db.session.commit()
+
     reserva_id = None
     try:
-        reserva = client.post(
-            "/api/reservas",
-            json={
-                "espacio_id": espacio_id,
-                "hora_inicio_planeada": (ahora - timedelta(hours=3)).isoformat(),
-                "hora_fin_planeada": (ahora - timedelta(hours=1)).isoformat(),
-                "placa": "EXP001",
-            },
-            headers=headers,
+        # Crear reserva pasada directo por DB
+        r = Reserva(
+            espacio_id=espacio.id,
+            usuario_id=usuario.id,
+            fecha=(ahora - timedelta(hours=3)).date(),
+            hora_inicio_planeada=ahora - timedelta(hours=3),
+            hora_fin_planeada=ahora - timedelta(hours=1),
+            placa="EXP001",
+            estado="confirmada",
         )
-        assert reserva.status_code == 201
-        reserva_id = reserva.get_json()["data"]["id"]
+        db.session.add(r)
+        db.session.commit()
+        reserva_id = r.id
 
-        espacio_antes = client.get(
-            f"/api/espacios?zona_id={espacios[0].get('zona_id', '')}",
-            headers=headers,
-        )
         res = runner.invoke(args=["reservas", "expirar"])
         assert res.exit_code == 0
         assert "1 reservas expiradas" in res.output
@@ -206,12 +208,55 @@ def test_comando_expirar(client, db, runner):
         reserva_db = db.session.get(Reserva, reserva_id)
         assert str(reserva_db.estado) == "completada"
 
-        espacio_db = db.session.get(Espacio, espacio_id)
-        assert str(espacio_db.estado) == "disponible"
+        assert str(espacio.estado) == "disponible"
     finally:
         if reserva_id is not None:
             db.session.query(Reserva).filter_by(id=reserva_id).delete()
         db.session.query(Espacio).filter_by(codigo="M-03").update(
+            {"estado": "disponible"}
+        )
+        db.session.commit()
+
+
+def test_comando_activar_reservas(client, db, runner):
+    """Crea reserva iniciada hace 30 min directo por DB, el cron la activa."""
+    from app.adapters.db.models import Espacio, Reserva, Usuario
+
+    ahora = datetime.now(timezone.utc)
+    usuario = Usuario.query.filter_by(correo="cliente@parqueo.test").first()
+    espacio = Espacio.query.filter_by(codigo="M-02").first()
+    assert usuario is not None and espacio is not None
+
+    # Limpiar cualquier residuo previo en M-02
+    Reserva.query.filter_by(espacio_id=espacio.id, estado="confirmada").delete()
+    espacio.estado = "disponible"
+    db.session.commit()
+
+    reserva_id = None
+    try:
+        # Reserva cuya ventana empezó hace 30 min y termina en +3.5h
+        r = Reserva(
+            espacio_id=espacio.id,
+            usuario_id=usuario.id,
+            fecha=ahora.date(),
+            hora_inicio_planeada=ahora - timedelta(minutes=30),
+            hora_fin_planeada=ahora + timedelta(hours=3, minutes=30),
+            placa="ACT001",
+            estado="confirmada",
+        )
+        db.session.add(r)
+        db.session.commit()
+        reserva_id = r.id
+
+        res = runner.invoke(args=["reservas", "expirar"])
+        assert res.exit_code == 0
+        assert "espacios activados" in res.output
+
+        assert str(espacio.estado) == "reservado"
+    finally:
+        if reserva_id is not None:
+            db.session.query(Reserva).filter_by(id=reserva_id).delete()
+        db.session.query(Espacio).filter_by(codigo="M-02").update(
             {"estado": "disponible"}
         )
         db.session.commit()

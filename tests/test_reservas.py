@@ -1,6 +1,8 @@
-"""Reservas — Fase 2A + fix ocupación + placa. Crea, solapa, cancela y limpia."""
+"""Reservas — Fase 2A + fix ocupación + placa + validación anti-pasado + activación cron."""
 
 from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from app.adapters.db.models import Espacio, Reserva, Usuario
 
@@ -17,7 +19,8 @@ def _horas_futuras(desde_horas=24, duracion=4):
 
 
 def _horas_ahora(duracion=4):
-    inicio = datetime.now(timezone.utc) - timedelta(minutes=5)
+    """Inicio = ahora +1 min (futura inmediata, sigue 'disponible')."""
+    inicio = datetime.now(timezone.utc) + timedelta(minutes=1)
     return inicio.isoformat(), (inicio + timedelta(hours=duracion)).isoformat()
 
 
@@ -30,12 +33,22 @@ def _estado_espacio(client, headers, codigo):
     raise AssertionError(f"espacio {codigo} no encontrado")
 
 
+# ── Tests existentes adaptados ─────────────────────────────────────
+
+
 def test_reservar_solapar_cancelar_con_limpieza(client, db):
     token = _token(client, "cliente@parqueo.test")
     headers = {"Authorization": f"Bearer {token}"}
     inicio, fin = _horas_futuras()
     reserva_id = None
     try:
+        # Limpiar residuos previos en A-01
+        esp = Espacio.query.filter_by(codigo="A-01").first()
+        if esp:
+            Reserva.query.filter_by(espacio_id=esp.id, estado="confirmada").delete()
+            esp.estado = "disponible"
+            db.session.commit()
+
         espacios = client.get("/api/espacios", headers=headers).get_json()["data"]
         espacio_id = next(e["id"] for e in espacios if e["codigo"] == "A-01")
 
@@ -73,7 +86,7 @@ def test_reservar_solapar_cancelar_con_limpieza(client, db):
         )
         assert solape.status_code == 409
 
-        # Rango inválido
+        # Rango inválido (fin < inicio)
         rango_malo = client.post(
             "/api/reservas",
             json={
@@ -248,8 +261,71 @@ def test_reserva_futura_no_cambia_estado(client, db):
             db.session.commit()
 
 
+def test_reserva_inmediata_dentro_de_gracia(client, db):
+    """Reserva con inicio = ahora-1min (dentro de la gracia 2min) se acepta y activa."""
+    token = _token(client, "cliente@parqueo.test")
+    headers = {"Authorization": f"Bearer {token}"}
+    ahora = datetime.now(timezone.utc)
+    inicio = (ahora - timedelta(minutes=1)).isoformat()
+    fin = (ahora + timedelta(hours=4)).isoformat()
+    reserva_id = None
+    try:
+        espacios = client.get("/api/espacios", headers=headers).get_json()["data"]
+        espacio_id = next(e["id"] for e in espacios if e["codigo"] == "B-02")
+
+        assert _estado_espacio(client, headers, "B-02") == "disponible"
+
+        creada = client.post(
+            "/api/reservas",
+            json={
+                "espacio_id": espacio_id,
+                "hora_inicio_planeada": inicio,
+                "hora_fin_planeada": fin,
+                "placa": "GRACE1",
+            },
+            headers=headers,
+        )
+        assert creada.status_code == 201
+        reserva_id = creada.get_json()["data"]["id"]
+
+        # La ventana ya empezó y está dentro de la gracia → estado reservado
+        assert _estado_espacio(client, headers, "B-02") == "reservado"
+    finally:
+        if reserva_id is not None:
+            db.session.query(Reserva).filter_by(id=reserva_id).delete()
+            db.session.query(Espacio).filter_by(codigo="B-02").update(
+                {"estado": "disponible"}
+            )
+            db.session.commit()
+
+
+def test_reserva_pasada_rechazada(client, db):
+    """Reserva con inicio hace 5 horas (fuera de la gracia) → 400."""
+    token = _token(client, "cliente@parqueo.test")
+    headers = {"Authorization": f"Bearer {token}"}
+    ahora = datetime.now(timezone.utc)
+    inicio = (ahora - timedelta(hours=5)).isoformat()
+    fin = (ahora - timedelta(hours=1)).isoformat()
+
+    espacios = client.get("/api/espacios", headers=headers).get_json()["data"]
+    espacio_id = next(e["id"] for e in espacios if e["codigo"] == "A-03")
+
+    res = client.post(
+        "/api/reservas",
+        json={
+            "espacio_id": espacio_id,
+            "hora_inicio_planeada": inicio,
+            "hora_fin_planeada": fin,
+            "placa": "PAST01",
+        },
+        headers=headers,
+    )
+    assert res.status_code == 400
+    assert "pasó" in res.get_json()["error"]
+
+
 def test_reserva_activa_si_cambia_estado(client, db):
-    """Reserva cuya ventana inicia pronto debería cambiar el estado a 'reservado'."""
+    """Reserva inmediata (+1 min) → sigue disponible; el cron la activa después."""
     token = _token(client, "cliente@parqueo.test")
     headers = {"Authorization": f"Bearer {token}"}
     inicio, fin = _horas_ahora(duracion=4)
@@ -273,14 +349,11 @@ def test_reserva_activa_si_cambia_estado(client, db):
         assert creada.status_code == 201
         reserva_id = creada.get_json()["data"]["id"]
 
-        # La ventana ya empezó → estado reservado
-        assert _estado_espacio(client, headers, "B-02") == "reservado"
+        # La ventana inicia en +1 min → aún no empezó → sigue disponible
+        assert _estado_espacio(client, headers, "B-02") == "disponible"
     finally:
         if reserva_id is not None:
             db.session.query(Reserva).filter_by(id=reserva_id).delete()
-            db.session.query(Espacio).filter_by(codigo="B-02").update(
-                {"estado": "disponible"}
-            )
             db.session.commit()
 
 
@@ -288,9 +361,9 @@ def test_cancelar_con_otra_vigente_no_libera(client, db):
     """Si hay otra reserva confirmada futura en el mismo espacio, cancelar una NO libera el estado."""
     token = _token(client, "cliente@parqueo.test")
     headers = {"Authorization": f"Bearer {token}"}
-    # R1: ventana activa AHORA (estado → reservado), R2: futura sin solape
     ahora = datetime.now(timezone.utc)
-    inicio1 = (ahora - timedelta(minutes=5)).isoformat()
+    # R1: ventana activa AHORA (estado → reservado), R2: futura sin solape
+    inicio1 = (ahora - timedelta(minutes=1)).isoformat()
     fin1 = (ahora + timedelta(hours=3)).isoformat()
     inicio2 = (ahora + timedelta(hours=4)).isoformat()
     fin2 = (ahora + timedelta(hours=8)).isoformat()
@@ -300,7 +373,7 @@ def test_cancelar_con_otra_vigente_no_libera(client, db):
         espacios = client.get("/api/espacios", headers=headers).get_json()["data"]
         espacio_id = next(e["id"] for e in espacios if e["codigo"] == "B-03")
 
-        # Reserva 1 (activa ahora → estado reservado)
+        # Reserva 1 (activa ahora → estado reservado, dentro de gracia)
         c1 = client.post(
             "/api/reservas",
             json={

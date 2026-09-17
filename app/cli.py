@@ -1,8 +1,11 @@
 """CLI: flask reservas expirar — Fase 4.
 
-Marca como completada las reservas confirmadas cuya hora_fin_planeada ya pasó.
-Libera el espacio si no tiene otra reserva activa. Idempotente.
-Ejecutar con cron del SO cada 10–15 minutos.
+Dos pases en un solo ciclo (cron del SO cada 10-15 minutos):
+  1. EXPIRAR: marca como completada las reservas cuya hora_fin_planeada ya pasó.
+     Libera el espacio si no tiene otra reserva activa.
+  2. ACTIVAR: reserva confirmada con hora_inicio_planeada <= ahora < hora_fin_planeada
+     y espacio todavia 'disponible' → cambia a 'reservado'.
+Idempotente.
 """
 
 import click
@@ -11,7 +14,7 @@ from flask import cli
 
 @click.group("reservas")
 def reservas_cli():
-    """Gestión de reservas vencidas."""
+    """Gestion de reservas vencidas y activacion."""
     pass
 
 
@@ -26,6 +29,8 @@ def expirar():
     from app.extensions import db
 
     ahora = datetime.now(timezone.utc)
+
+    # ── Pase 1: expirar vencidas ──────────────────────────────
     vencidas = (
         Reserva.query.filter(
             and_(
@@ -36,10 +41,6 @@ def expirar():
         .with_for_update()
         .all()
     )
-    if not vencidas:
-        click.echo("0 reservas expiradas")
-        return
-
     espacios_liberados = 0
     for reserva in vencidas:
         reserva.estado = "completada"
@@ -58,8 +59,29 @@ def expirar():
                 espacio.estado = "disponible"
                 espacios_liberados += 1
 
+    # ── Pase 2: activar reservas iniciadas ────────────────────
+    espacios_activados = 0
+    iniciadas = (
+        Reserva.query.filter(
+            and_(
+                Reserva.estado == "confirmada",
+                Reserva.hora_inicio_planeada <= ahora,
+                Reserva.hora_fin_planeada > ahora,
+            )
+        )
+        .all()
+    )
+    for reserva in iniciadas:
+        espacio = db.session.get(Espacio, reserva.espacio_id)
+        if espacio and espacio.estado == "disponible":
+            espacio.estado = "reservado"
+            espacios_activados += 1
+
     db.session.commit()
-    click.echo(f"{len(vencidas)} reservas expiradas, {espacios_liberados} espacios liberados")
+    click.echo(
+        f"{len(vencidas)} reservas expiradas, {espacios_liberados} espacios liberados, "
+        f"{espacios_activados} espacios activados"
+    )
 
 
 def register_commands(app):

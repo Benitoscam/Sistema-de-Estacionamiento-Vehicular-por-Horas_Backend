@@ -6,18 +6,24 @@ a 'reservado' SOLO si la ventana está activa ahora. Sin cobro (Fase 3).
 Placa requerida (validada con VO Placa, mayúsculas, 3-15 chars).
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.adapters.db.models import Espacio, Reserva, Usuario
-from app.domain.excepciones import RecursoNoEncontrado
+from app.domain.excepciones import RecursoNoEncontrado, RangoInvalido
 from app.domain.services import disponibilidad, tarifas
 from app.domain.value_objects import Placa, RangoHorario
 from app.extensions import db
+
+GRACIA_SEGUNDOS = 120  # 2 minutos de tolerancia contra desfases de reloj
 
 
 def ejecutar(usuario_id, espacio_id, inicio, fin, placa):
     rango = RangoHorario(inicio, fin)
     placa_normal = str(Placa(placa))
+
+    ahora = datetime.now(timezone.utc)
+    if rango.inicio < (ahora - timedelta(seconds=GRACIA_SEGUNDOS)):
+        raise RangoInvalido("la hora de entrada ya pasó")
 
     espacio = (
         db.session.query(Espacio)
@@ -54,7 +60,6 @@ def ejecutar(usuario_id, espacio_id, inicio, fin, placa):
         estado="confirmada",
     )
 
-    ahora = datetime.now(timezone.utc)
     if rango.inicio <= ahora < rango.fin:
         espacio.estado = "reservado"
 
