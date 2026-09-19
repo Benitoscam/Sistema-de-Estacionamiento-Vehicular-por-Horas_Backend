@@ -5,6 +5,9 @@ from datetime import timezone
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
+from app.domain.services import tarifas
+from app.domain.value_objects import RangoHorario
+
 from app.adapters.db.models import Reserva, Usuario
 from app.adapters.http import schemas
 from app.adapters.http.decorators import roles_required
@@ -60,6 +63,11 @@ def _parse_fecha(valor):
     except (ValueError, TypeError, AttributeError):
         return None
 
+def _calcular_monto_estimado(reserva):
+    if reserva.espacio is None or reserva.espacio.zona is None:
+        return None
+    rango = RangoHorario(reserva.hora_inicio_planeada, reserva.hora_fin_planeada)
+    return tarifas.monto_estimado(reserva.espacio.zona.tarifa_por_hora, rango)
 
 def reserva_a_dict(reserva, monto_estimado=None):
     return {
@@ -125,7 +133,9 @@ def mis_reservas():
     if placa:
         consulta = consulta.filter(Reserva.placa == placa)
     reservas = consulta.order_by(Reserva.hora_inicio_planeada).all()
-    return jsonify({"data": [reserva_a_dict(r) for r in reservas]}), 200
+    return jsonify({
+        "data": [reserva_a_dict(r, _calcular_monto_estimado(r)) for r in reservas]
+    }), 200
 
 
 @bp.route("/reservas/<reserva_id>", methods=["GET"])
@@ -143,7 +153,9 @@ def detalle_reserva(reserva_id):
         return error("reserva no encontrada", 404, "no_encontrado")
     if str(usuario.rol) != "admin" and reserva.usuario_id != usuario.id:
         return error("solo el dueño o un admin puede ver la reserva", 403, "prohibido")
-    return jsonify({"data": reserva_a_dict(reserva)}), 200
+    return jsonify({
+        "data": reserva_a_dict(reserva, _calcular_monto_estimado(reserva))
+    }), 200
 
 
 @bp.route("/reservas/<reserva_id>", methods=["DELETE"])
