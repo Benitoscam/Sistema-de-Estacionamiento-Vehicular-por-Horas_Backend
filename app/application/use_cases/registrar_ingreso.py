@@ -8,7 +8,7 @@ Un espacio 'reservado' se rechaza: las reservas entran por su propio flujo.
 
 from datetime import datetime, timezone
 
-from app.adapters.db.models import Espacio, RegistroIngresoSalida
+from app.adapters.db.models import Espacio, Reserva, RegistroIngresoSalida
 from app.domain.excepciones import EspacioNoDisponible, RecursoNoEncontrado
 from app.domain.value_objects import Placa
 from app.extensions import db
@@ -30,11 +30,26 @@ def ejecutar(operador, espacio_id, placa):
             f"espacio en estado '{espacio.estado}', no admite ingreso walk-in"
         )
 
+    ahora = datetime.now(timezone.utc)
+    tiene_reserva_futura = (
+        Reserva.query.filter(
+            Reserva.espacio_id == espacio.id,
+            Reserva.estado == "confirmada",
+            Reserva.hora_fin_planeada > ahora,
+        )
+        .first()
+        is not None
+    )
+    if tiene_reserva_futura:
+        raise EspacioNoDisponible(
+            "espacio tiene una reserva confirmada pendiente, no admite ingreso walk-in"
+        )
+
     registro = RegistroIngresoSalida(
         espacio_id=espacio.id,
         placa=placa_normal,
         operador_id=operador.id,
-        hora_entrada=datetime.now(timezone.utc),
+        hora_entrada=ahora,
         hora_salida=None,
         monto_cobrado=None,
     )
